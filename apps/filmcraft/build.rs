@@ -20,10 +20,11 @@ mod windows {
     pub fn embed_resources() {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("../../assets/app-icon/filmcraft.ico")
-            .set("ProductName", "FilmCraft")
-            .set("FileDescription", "FilmCraft video editor")
-            .set("LegalCopyright", "Copyright (c) the FilmCraft contributors. MIT OR Apache-2.0.")
-            .set("OriginalFilename", "filmcraft.exe")
+            // RECut: Explorer, the taskbar and Task Manager show RECut, not FilmCraft.
+            .set("ProductName", "RECut")
+            .set("FileDescription", "RECut, monteur video (base sur FilmCraft)")
+            .set("LegalCopyright", "Copyright (c) the FilmCraft contributors and RECut. MIT OR Apache-2.0.")
+            .set("OriginalFilename", "RECut.exe")
             .set("InternalName", "filmcraft");
         if let Err(e) = res.compile() {
             if std::env::var_os("FILMCRAFT_REQUIRE_WINRES").is_some() {

@@ -90,14 +90,15 @@ fn community_links_everywhere() {
     for (id, label, _) in links::ALL {
         assert!(text.contains(id) && text.contains(label), "Help menu lists {id}");
     }
-    // Header: the Discord button is always there.
-    assert_eq!(d.ids("header.discord"), vec!["header.discord".to_string()]);
+    // RECut: the header shows the RECut wordmark where FilmCraft has its Discord button (RECUT.md).
+    assert_eq!(d.ids("header.recut"), vec!["header.recut".to_string()]);
     d.snapshot("header");
-    // About dialog: Discord first, then website, app page, GitHub, issues.
+    // RECut: About lists RECut's repository first, then the original project's Discord, website, app
+    // page, GitHub and issues.
     d.ok("engine.execute", json!({"command": "app.about", "params": {}}));
     d.frames(3);
     let about = d.ids("about.");
-    for id in ["about.discord", "about.website", "about.appPage", "about.github", "about.reportIssue"] {
+    for id in ["about.recut", "about.discord", "about.website", "about.appPage", "about.github", "about.reportIssue"] {
         assert!(about.iter().any(|a| a == id), "{id} in {about:?}");
     }
     d.snapshot("about");

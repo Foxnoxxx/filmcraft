@@ -1,0 +1,96 @@
+# RECut: builds the Windows x64 version and publishes it as a GitHub release (RECUT.md).
+#
+# FilmCraft's own workflows (signed releases, FreeBSD, Windows ARM64, packaging lint) are removed from
+# RECut: they need the ArtCraft team's signing secrets or build platforms RECut doesn't use.
+#
+# Each build publishes a release named recut-<FilmCraft version>-b<build number> with
+# RECut-<...>-windows-x64.zip: unzip it anywhere and run RECut.exe. Preferences, presets, logs and
+# crash recovery live in %APPDATA%\RECut, so replacing the folder with a newer build keeps them.
+name: RECut Windows
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: recut-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      # Static C runtime: no Visual C++ redistributable needed on the user's PC.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: -C target-feature=+crt-static
+      # Fail rather than ship an exe without its icon and RECut version info.
+      FILMCRAFT_REQUIRE_WINRES: "1"
+      RECUT_BUILD: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: recut-windows-x64
+
+      - name: Version
+        id: version
+        shell: pwsh
+        run: |
+          $inPkg = $false
+          foreach ($line in Get-Content Cargo.toml) {
+            if ($line -match '^\s*\[') { $inPkg = ($line.Trim() -eq '[workspace.package]'); continue }
+            if ($inPkg -and $line -match '^\s*version\s*=\s*"([^"]+)"') { $v = $Matches[1]; break }
+          }
+          if (-not $v) { throw 'no [workspace.package] version in Cargo.toml' }
+          "filmcraft=$v" >> $env:GITHUB_OUTPUT
+          "tag=recut-$v-b$env:RECUT_BUILD" >> $env:GITHUB_OUTPUT
+          $env:FILMCRAFT_BUILD_SHA = git rev-parse HEAD
+          "FILMCRAFT_BUILD_SHA=$env:FILMCRAFT_BUILD_SHA" >> $env:GITHUB_ENV
+          "FILMCRAFT_BUILD_DATE=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd'))" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --locked -p filmcraft -p filmcraft-cli --target x86_64-pc-windows-msvc
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = "target\$env:TARGET\release"
+          $name = "RECut-${{ steps.version.outputs.filmcraft }}-b$env:RECUT_BUILD-windows-x64"
+          $dir = "dist\$name"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "$bin\filmcraft.exe" "$dir\RECut.exe"
+          Copy-Item "$bin\filmcraft-cli.exe" "$dir\filmcraft-cli.exe"
+          foreach ($f in 'RECUT.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'ATTRIBUTION.md') { Copy-Item $f $dir }
+          & "$dir\filmcraft-cli.exe" --version
+          if ($LASTEXITCODE -ne 0) { throw 'filmcraft-cli --version failed' }
+          Compress-Archive -Path $dir -DestinationPath "dist\$name.zip"
+          "zip=dist\$name.zip" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.name }}
+          path: ${{ steps.package.outputs.zip }}
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = "RECut build $env:RECUT_BUILD, based on FilmCraft ${{ steps.version.outputs.filmcraft }} (commit $env:FILMCRAFT_BUILD_SHA).`n`nDownload the zip below, unzip it and run RECut.exe."
+          gh release create "${{ steps.version.outputs.tag }}" "${{ steps.package.outputs.zip }}" --target "$env:GITHUB_SHA" --title "RECut build $env:RECUT_BUILD" --notes "$notes"
