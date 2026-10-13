@@ -3594,3 +3594,5 @@
 	Export the labels to a preset file…	ラベルをプリセットファイルに書き出し…
 	Show the presets folder	プリセットフォルダーを表示
 	Delete this preset	このプリセットを削除
+# RECut: strings added by RECut (RECUT.md).
+	Nest as Multi-Camera	マルチカメラとしてネスト

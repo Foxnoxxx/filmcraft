@@ -3288,6 +3288,8 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::settings::commands());
     v.extend(crate::mixer::commands());
     v.extend(crate::multicam::commands());
+    // RECut: commands added by RECut (RECUT.md).
+    v.extend(crate::recut::commands());
     v.extend(crate::essential_sound::commands());
     v.extend(crate::color::commands());
     v.extend(crate::graphics::commands());

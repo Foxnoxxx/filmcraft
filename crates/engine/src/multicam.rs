@@ -605,7 +605,27 @@ fn create_multicam(s: &mut Session, p: &Value) -> Result<Value> {
     let flags: Vec<(bool, bool)> = clips.iter().map(|c| (has_v(s, c), has_a(s, c))).collect();
     let names: Vec<String> = clips.iter().enumerate().map(|(i, c)| camera_name(&s.project, c.item, &names_mode, i + 1)).collect();
     let nv = flags.iter().filter(|f| f.0).count();
-    let na = flags.iter().filter(|f| f.1).count();
+    // RECut: every audio clip a camera makes when edited into a sequence (each container stream, and
+    // each Audio Channels clip) goes into the source on its own track, and all of them belong to that
+    // camera. FilmCraft placed only the first stream, so an OBS recording with the voice and the game
+    // on separate tracks lost all but one of them (RECUT.md).
+    let audio_specs: Vec<Vec<crate::commands::AudioPlacementSpec>> = clips
+        .iter()
+        .zip(&flags)
+        .map(|(c, f)| {
+            if !f.1 {
+                return Vec::new();
+            }
+            let media = s.project.resolve_media(c.item);
+            let map: Vec<Vec<u16>> = media.and_then(|(_, m, _)| m.interpret.audio_channels.as_ref()).map(|m| m.clips.clone()).unwrap_or_default();
+            let streams = media.map_or(1, |(_, m, _)| m.info.audio_streams.len());
+            crate::commands::audio_placement_specs(&map, streams)
+        })
+        .collect();
+    let na: usize = audio_specs.iter().map(Vec::len).fold(0, usize::saturating_add);
+    if na > crate::sequence_tools::MAX_TRACKS {
+        return Err(bad(cmd, format!("the cameras have {na} audio tracks; a sequence has at most {}", crate::sequence_tools::MAX_TRACKS)));
+    }
     let id = s.edit("Create Multi-Camera Source Sequence", |pr, st| {
         let sid = pr.new_sequence(&name, settings.clone(), nv, na.max(1), None);
         let mut cameras = Vec::new();
@@ -627,26 +647,45 @@ fn create_multicam(s: &mut Session, p: &Value) -> Result<Value> {
                 vi += 1;
             }
             if ha {
-                let mut a = placed_item(pr, c.item, TrackKind::Audio, starts[k], c.range, &settings).ok_or_else(|| bad(cmd, "bad clip"))?;
-                a.link = link;
-                placed.push((TrackKind::Audio, ai, a));
-                cam.audio_tracks.push(atracks[ai]);
-                ai += 1;
+                // RECut: one clip per audio stream / Audio Channels clip, all linked together.
+                let a = placed_item(pr, c.item, TrackKind::Audio, starts[k], c.range, &settings).ok_or_else(|| bad(cmd, "bad clip"))?;
+                let specs = audio_specs.get(k).map(Vec::as_slice).unwrap_or_default();
+                let link = link.or_else(|| (specs.len() > 1).then(|| pr.alloc_id()));
+                for (j, spec) in specs.iter().enumerate() {
+                    let mut b = a.clone();
+                    if j > 0 {
+                        b.id = ClipId(pr.alloc_id());
+                    }
+                    b.link = link;
+                    b.audio_stream = spec.audio_stream;
+                    if spec.audio_stream > 0 {
+                        b.source_channels.clear();
+                    }
+                    if let Some(chans) = &spec.source_channels {
+                        b.source_channels = chans.clone();
+                    }
+                    let track = atracks.get(ai).copied().ok_or_else(|| bad(cmd, "too few audio tracks"))?;
+                    placed.push((TrackKind::Audio, ai, b));
+                    cam.audio_tracks.push(track);
+                    ai += 1;
+                }
             }
             cameras.push(cam);
         }
         {
             let q = pr.sequence_mut(sid).ok_or(EngineError::NoSequence)?;
             for (kind, idx, it) in placed {
-                q.tracks_mut(kind)[idx].items.push(it);
+                q.tracks_mut(kind).get_mut(idx).ok_or_else(|| bad(cmd, "too few tracks"))?.items.push(it);
             }
             for cam in &cameras {
                 if let Some(vt) = cam.video_track.and_then(|id| q.video_tracks.iter_mut().find(|x| x.id == id)) {
                     vt.name = cam.name.clone();
                 }
-                for at in &cam.audio_tracks {
+                // RECut: a camera with several audio tracks numbers them ("Zenh 1", "Zenh 2"…).
+                let several = cam.audio_tracks.len() > 1;
+                for (j, at) in cam.audio_tracks.iter().enumerate() {
                     if let Some(x) = q.audio_tracks.iter_mut().find(|x| x.id == *at) {
-                        x.name = cam.name.clone();
+                        x.name = if several { format!("{} {}", cam.name, j + 1) } else { cam.name.clone() };
                     }
                 }
             }

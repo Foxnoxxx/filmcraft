@@ -427,6 +427,8 @@ fn multicam_clip_structure_and_render() {
 #[test]
 fn switch_audio_follows_video() {
     let (mut s, _, src, _) = mc_session("switch");
+    // RECut: audio follows video is on by default in RECut; this test starts with it off
+    s.execute("multicam.audioFollowsVideo", json!({"enabled": false})).unwrap();
     // audio follows video off (Premiere's default): only the picture switches
     s.execute("multicam.switchAngle", json!({"camera": 2, "frame": 5})).unwrap();
     assert_eq!((v1(&s), a1(&s)), (vec![(0, 1)], vec![(0, 0)]));
@@ -667,6 +669,8 @@ impl filmcraft_media::MediaSource for Recording {
 #[test]
 fn more_than_sixteen_angles_page_and_switch() {
     let (mut s, src) = many_angles(20);
+    // RECut: audio follows video is on by default in RECut; this test needs it off
+    s.execute("multicam.audioFollowsVideo", json!({"enabled": false})).unwrap();
     assert_eq!(s.project.sequence(src).unwrap().multicam.as_ref().unwrap().cameras.len(), 20);
     // automatic layout: 4×4 pages, two of them
     let g = s.execute("multicam.grid", json!({})).unwrap();
@@ -775,7 +779,8 @@ fn selection_top_down_and_view_toggles() {
     assert_eq!(s.execute("multicam.showPreviewMonitor", json!({})).unwrap()["enabled"], false);
     let t = s.execute("multicam.transmitView", json!({})).unwrap();
     assert_eq!((t["enabled"].as_bool(), t["device"].is_null()), (Some(true), true));
-    assert_eq!(s.execute("multicam.audioFollowsVideo", json!({})).unwrap()["enabled"], true);
+    // RECut: on by default in RECut, so the toggle turns it off
+    assert_eq!(s.execute("multicam.audioFollowsVideo", json!({})).unwrap()["enabled"], false);
 }
 
 /// Process CPU time in seconds (user + system), for the perf test.

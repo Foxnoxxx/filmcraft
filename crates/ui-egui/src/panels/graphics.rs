@@ -1643,9 +1643,25 @@ pub fn properties(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 if !filmcraft_text::fonts::system_scanned() {
                     filmcraft_text::fonts::scan_system();
                 }
-                for (f, _) in &fams {
+                // RECut: a search field above the list; typing part of a name keeps the fonts
+                // that contain it (RECUT.md)
+                let qid = egui::Id::new(("gfx-font-search", clip.0, l));
+                let mut query = ui.ctx().data(|d| d.get_temp::<String>(qid)).unwrap_or_default();
+                let field = ui.add(egui::TextEdit::singleline(&mut query).hint_text(tl!("Search")).desired_width(f32::INFINITY));
+                cx.auto("fontSearch", field.rect, "Search");
+                // the field takes the keyboard when the list opens, so typing searches at once
+                let shown = qid.with("shown");
+                let frame = ui.ctx().cumulative_frame_nr();
+                if ui.ctx().data(|d| d.get_temp::<u64>(shown)).is_none_or(|last| last.saturating_add(1) < frame) {
+                    field.request_focus();
+                }
+                ui.ctx().data_mut(|d| d.insert_temp(shown, frame));
+                ui.ctx().data_mut(|d| d.insert_temp(qid, query.clone()));
+                let needle = query.trim().to_lowercase();
+                for (f, _) in fams.iter().filter(|(f, _)| needle.is_empty() || f.to_lowercase().contains(&needle)) {
                     if ui.selectable_label(*f == family, f).clicked() {
                         cx.set("font", json!(f));
+                        ui.ctx().data_mut(|d| d.remove::<String>(qid));
                     }
                 }
             });

@@ -1764,6 +1764,9 @@ impl FilmcraftApp {
         // the Timeline has had its chance to place a file drop this frame; anything left stays a bin import
         self.pending_timeline_drop = None;
         panels::dialogs::show(self, &ctx);
+        // RECut: waveform analysis pauses while the timeline plays (RECUT.md)
+        #[cfg(not(target_arch = "wasm32"))]
+        panels::timeline::peak_throttle::set_playing(self.playback.playing);
         if !self.ui.show_status_bar {
             // no bar to draw the job in, but a finished preview render still plays
             self.watch_jobs(ui.ctx());
@@ -1821,7 +1824,19 @@ impl FilmcraftApp {
     /// bar and a cancel button.
     fn job_status(&mut self, ui: &mut egui::Ui, sb: egui::Rect, t: &Tokens) {
         use std::sync::atomic::Ordering;
-        let Some(job) = self.watch_jobs(ui.ctx()) else { return };
+        let Some(job) = self.watch_jobs(ui.ctx()) else {
+            // RECut: no job: say when audio waveforms are still being analysed (RECUT.md)
+            let n = panels::timeline::waveforms_pending(self);
+            if n > 0 {
+                let what = if self.playback.playing { "en pause pendant la lecture" } else { "en cours" };
+                let text = format!("Analyse audio des formes d'onde : {n} piste(s) {what}…");
+                let at = egui::pos2(sb.max.x - 10.0, sb.center().y);
+                let r = ui.painter().text(at, egui::Align2::RIGHT_CENTER, text.clone(), Tokens::ui(11.0), t.text_dim);
+                self.auto.add("status.waveforms", r, &text);
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+            }
+            return;
+        };
         let f = job.progress.fraction().clamp(0.0, 1.0);
         let left = job.progress.eta().map(panels::left_text).unwrap_or_default();
         let cancel = egui::Rect::from_center_size(egui::pos2(sb.max.x - 14.0, sb.center().y), egui::vec2(14.0, 14.0));

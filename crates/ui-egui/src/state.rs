@@ -684,7 +684,8 @@ impl Default for SyncDraft {
             marker: String::new(),
             offset: 0,
             track: String::new(),
-            audio: "camera1".into(),
+            // RECut: a new multi-camera source switches its sound with the angle (RECUT.md)
+            audio: "switch".into(),
             camera_names: "clip".into(),
             processed_bin: true,
             remove_video_audio: false,

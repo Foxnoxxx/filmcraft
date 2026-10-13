@@ -1035,6 +1035,9 @@ fn request_sequence_peaks(app: &mut FilmcraftApp, item: ItemId) -> Option<Arc<Ve
     let project = app.session.project.clone();
     let provider = app.session.media.provider(project.clone(), app.session.services.clone());
     let run = move || {
+        // RECut: a few analyses at a time (RECUT.md)
+        #[cfg(not(target_arch = "wasm32"))]
+        let _slot = peak_throttle::acquire();
         // a panic in the mix must not take the app down with it, nor leave the item pending for good
         let mixed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let seq = project.sequence(item)?;
@@ -1046,6 +1049,9 @@ fn request_sequence_peaks(app: &mut FilmcraftApp, item: ItemId) -> Option<Arc<Ve
             let mut out = Vec::with_capacity(total / bucket + 1);
             let mut s = 0usize;
             while s < total {
+                // RECut: let playback have the CPU (RECUT.md)
+                #[cfg(not(target_arch = "wasm32"))]
+                peak_throttle::yield_to_playback();
                 let n = chunk.min(total - s);
                 let buf = filmcraft_render::audio::mix_sequence(&project, seq, s as i64, n, &provider);
                 let ch = buf.channels.first()?;
@@ -1070,6 +1076,55 @@ fn request_sequence_peaks(app: &mut FilmcraftApp, item: ItemId) -> Option<Arc<Ve
     have
 }
 
+/// RECut: waveform analysis decodes each clip's whole audio stream. With a few long recordings
+/// (four 3-hour OBS files, a dozen streams) every stream was analysed at once and playback stuttered
+/// until they were done. Here at most [`peak_throttle::WORKERS`] streams are analysed at a time, and
+/// analysis waits while the timeline plays (RECUT.md).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod peak_throttle {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Condvar, Mutex, PoisonError};
+
+    /// Streams analysed at the same time.
+    pub const WORKERS: usize = 2;
+    static RUNNING: Mutex<usize> = Mutex::new(0);
+    static FREED: Condvar = Condvar::new();
+    static PLAYING: AtomicBool = AtomicBool::new(false);
+
+    /// Called every frame with the playback state.
+    pub fn set_playing(on: bool) {
+        PLAYING.store(on, Ordering::Relaxed);
+    }
+
+    /// One analysis running; the slot frees itself when dropped (also on a panic).
+    pub struct Slot(());
+
+    impl Drop for Slot {
+        fn drop(&mut self) {
+            let mut n = RUNNING.lock().unwrap_or_else(PoisonError::into_inner);
+            *n = n.saturating_sub(1);
+            FREED.notify_one();
+        }
+    }
+
+    /// Wait for a free slot (worker threads only: never on the UI thread).
+    pub fn acquire() -> Slot {
+        let mut n = RUNNING.lock().unwrap_or_else(PoisonError::into_inner);
+        while *n >= WORKERS {
+            n = FREED.wait(n).unwrap_or_else(PoisonError::into_inner);
+        }
+        *n += 1;
+        Slot(())
+    }
+
+    /// Between two chunks of analysis: wait while the timeline plays (worker threads only).
+    pub fn yield_to_playback() {
+        while PLAYING.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+}
+
 /// Min/max peaks (one per 256 samples at 48 kHz) of audio stream `stream` of `src`, `dur` long.
 fn source_peaks(src: &dyn filmcraft_media::MediaSource, stream: usize, dur: Tick) -> Vec<(f32, f32)> {
     let sr = 48_000u32;
@@ -1078,6 +1133,9 @@ fn source_peaks(src: &dyn filmcraft_media::MediaSource, stream: usize, dur: Tick
     let chunk = 48_000 * 4;
     let mut s = 0usize;
     while s < total {
+        // RECut: let playback have the CPU (RECUT.md)
+        #[cfg(not(target_arch = "wasm32"))]
+        peak_throttle::yield_to_playback();
         let n = chunk.min(total - s);
         match src.audio_stream(stream, s as i64, n, sr) {
             Ok(buf) => {
@@ -1092,6 +1150,11 @@ fn source_peaks(src: &dyn filmcraft_media::MediaSource, stream: usize, dur: Tick
         s += n;
     }
     out
+}
+
+/// RECut: how many waveforms are still being analysed (shown in the status bar).
+pub(crate) fn waveforms_pending(app: &FilmcraftApp) -> usize {
+    app.tl.peaks_pending.lock().unwrap_or_else(|e| e.into_inner()).len()
 }
 
 /// Waveform peaks of audio stream `stream` of `item` (a clip's `audio_stream`).
@@ -1116,6 +1179,9 @@ pub(crate) fn request_peaks(app: &mut FilmcraftApp, item: ItemId, stream: usize)
     let pending = app.tl.peaks_pending.clone();
     let dur = src.info().duration;
     let run = move || {
+        // RECut: a few streams at a time (RECUT.md)
+        #[cfg(not(target_arch = "wasm32"))]
+        let _slot = peak_throttle::acquire();
         let out = source_peaks(&*src, stream, dur);
         peaks.lock().unwrap_or_else(|e| e.into_inner()).insert(pkey, Arc::new(out));
         pending.lock().unwrap_or_else(|e| e.into_inner()).retain(|i| *i != pkey);
@@ -1904,12 +1970,16 @@ pub(crate) const CLIP_MENU: &[&[(&str, &str)]] = &[
         ("Synchronize…", "clip.synchronize"),
         ("Merge Clips…", "clip.mergeClips"),
         ("Nest…", "clip.nest"),
+        // RECut: clips in sync on several video tracks → one multi-camera clip whose sound follows the angle
+        ("Nest as Multi-Camera", "recut.nestMulticam"),
         ("Make Subsequence", "sequence.makeSubsequence"),
         ("Reveal Nested Sequence", "sequence.revealNested"),
         ("Multi-Camera", "clip.multicam"),
     ],
     &[("Label", "edit.label")],
     &[("Speed/Duration…", "clip.speedDuration"), ("Scene Edit Detection…", "clip.sceneEditDetection")],
+    // RECut: the audio clip settings, as in Premiere's clip menu
+    &[("Audio Gain…", "clip.audioGain"), ("Audio Channels…", "clip.audioChannels")],
     &[
         ("Frame Hold Options…", "clip.frameHoldOptions"),
         ("Add Frame Hold", "clip.frameHold"),
@@ -2737,7 +2807,13 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                 let r = ui.add_enabled(!sel.is_empty() && app.session.is_enabled(cmd), egui::Button::new(label));
                 app.auto.add(&format!("timeline.clipMenu.{cmd}"), r.rect, label);
                 if r.clicked() {
-                    match crate::menus::invoke(app, &ctx, cmd, json!({})) {
+                    // RECut: Audio Channels… here edits the timeline clips, not a Project panel item
+                    let result = if cmd == "clip.audioChannels" {
+                        crate::panels::clip_dialogs::open_audio_channels_for_timeline(app)
+                    } else {
+                        crate::menus::invoke(app, &ctx, cmd, json!({}))
+                    };
+                    match result {
                         // Unlink (#220): the clips were selected together because they were linked;
                         // keep only the one right-clicked, so it can be dragged away from the others
                         Ok(v) if cmd == "clip.link" && v["linked"] == json!(false) => {

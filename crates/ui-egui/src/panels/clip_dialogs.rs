@@ -106,6 +106,30 @@ pub fn route(app: &mut FilmcraftApp, id: &str, params: &Value) -> Option<Result<
     Some(Ok(json!({"dialog": meta(id).map(|m| m.1)})))
 }
 
+/// RECut: Audio Channels… from the timeline clip menu edits the selected timeline clips (which
+/// source channels they play; one channel = mono on both sides), even when a Project panel item is
+/// selected too (RECUT.md).
+pub(crate) fn open_audio_channels_for_timeline(app: &mut FilmcraftApp) -> Result<Value, String> {
+    let s = &app.session;
+    let clip = s
+        .active_sequence()
+        .and_then(|q| s.state.selection.iter().find_map(|c| q.audio_tracks.iter().find_map(|t| t.item(*c)).cloned()))
+        .ok_or_else(|| "select an audio clip".to_string())?;
+    let n = s
+        .project
+        .resolve_media(clip.item)
+        .and_then(|(_, m, _)| m.info.audio_streams.get(clip.audio_stream).map(|a| a.channels))
+        .map_or(2, |c| c.clamp(1, 32) as u16);
+    let chans: Vec<u16> = if clip.source_channels.is_empty() { (0..n.min(2)).collect() } else { clip.source_channels.clone() };
+    app.ui.clip_dialog = Some(ClipDialogDraft {
+        command: "clip.audioChannels".into(),
+        params: json!({"channels": chans}),
+        info: json!({"channels": n, "items": false}),
+        error: String::new(),
+    });
+    Ok(json!({"dialog": "audioChannels"}))
+}
+
 /// A request to close the window (Quit, the title bar's close button, the OS): with unsaved
 /// changes it is cancelled and Save / Don't Save / Cancel is asked first, as in Premiere (#266).
 /// Returns whether the close must be cancelled.

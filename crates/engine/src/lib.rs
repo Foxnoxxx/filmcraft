@@ -36,11 +36,13 @@ pub mod panels;
 pub mod paste_media;
 pub mod perf;
 pub mod presets;
+// RECut: commands added by RECut (RECUT.md).
 pub mod previews;
 pub mod project_manager;
 pub mod project_panel;
 pub mod project_tools;
 pub mod proxies;
+pub mod recut;
 pub mod relink;
 pub mod remix;
 pub mod scene_detect;
@@ -505,6 +507,9 @@ impl Session {
                 linked_selection: true,
                 default_video_transition: "cross_dissolve".into(),
                 default_audio_transition: "constant_power".into(),
+                // RECut: Multi-Camera Audio Follows Video is on by default (off in FilmCraft and
+                // Premiere): cutting a camera's picture cuts its sound with it (RECUT.md).
+                multicam_audio_follows_video: true,
                 ..Default::default()
             },
             media: Arc::new(MediaPool::default()),
@@ -1277,10 +1282,13 @@ mod presets_tests;
 mod previews_tests;
 #[cfg(test)]
 mod project_manager_tests;
+// RECut: tests of the RECut additions (RECUT.md).
 #[cfg(test)]
 mod project_panel_tests;
 #[cfg(test)]
 mod proxies_tests;
+#[cfg(test)]
+mod recut_tests;
 #[cfg(test)]
 mod relink_tests;
 #[cfg(test)]

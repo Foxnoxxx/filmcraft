@@ -61,8 +61,23 @@ les secrets de signature d'ArtCraft).
 | 2026-10-12 | Dossier de données séparé (`%APPDATA%\RECut`, variable `RECUT_DATA_DIR`) | `crates/engine/src/autosave.rs` |
 | 2026-10-12 | Logo RECut dessiné dans le code (point rouge d'enregistrement + « RECut ») à la place du logo ArtCraft ; en-tête : logo RECut à la place du bouton Discord ; À propos : nom, numéro de build, mention « basé sur FilmCraft », lien vers ce dépôt | `crates/ui-egui/src/brand.rs`, `header.rs`, `panels/dialogs.rs`, `tests/links_ui.rs` |
 | 2026-10-12 | Compilation Windows automatique et publication en release ; suppression des workflows de FilmCraft | `.github/workflows/recut-windows.yml` |
+| 2026-10-13 | **Imbriquer en multicaméra** (`recut.nestMulticam`, menu Clip et clic droit) : des clips déjà synchronisés, empilés sur plusieurs pistes vidéo, deviennent une séquence source multicaméra (une caméra par piste vidéo, avec le son qui lui est lié) remplacée par un clip multicaméra dont le son suit l'angle. Le son lié à aucune image (musique) reste audible sur tous les angles | `crates/engine/src/recut.rs`, `recut_tests.rs`, `commands.rs`, `lib.rs`, `ui-egui/src/panels/timeline.rs`, catalogues `i18n/*.tsv` |
+| 2026-10-13 | Créer une séquence source multicaméra : chaque caméra garde **toutes ses pistes audio** (tous les flux d'un enregistrement OBS, et les clips de Canaux audio), au lieu du seul premier flux ; mode audio « Changer l'audio » par défaut dans la boîte de dialogue | `crates/engine/src/multicam.rs`, `ui-egui/src/state.rs` |
+| 2026-10-13 | « L'audio multicaméra suit la vidéo » activé par défaut (désactivé dans FilmCraft et Premiere) | `crates/engine/src/lib.rs`, `multicam_tests.rs` (3 tests adaptés) |
+| 2026-10-13 | Clic droit sur un clip : **Gain audio…** (dont normalisation) et **Canaux audio…** ; depuis la timeline, Canaux audio modifie le clip de la timeline (une seule voie cochée = mono des deux côtés), même si un élément du panneau Projet est sélectionné | `ui-egui/src/panels/timeline.rs`, `panels/clip_dialogs.rs`, `tests/recut_ui.rs` |
+| 2026-10-13 | **Recherche de police** : champ de recherche en tête de la liste des polices (Graphiques), qui prend le clavier à l'ouverture | `ui-egui/src/panels/graphics.rs`, `tests/recut_ui.rs` |
+| 2026-10-13 | Formes d'onde audio : au plus 2 flux analysés à la fois, analyse en pause pendant la lecture, avancement affiché dans la barre d'état (avant : tous les flux décodés en même temps, lecture saccadée sur de longs rushs) | `ui-egui/src/panels/timeline.rs`, `ui-egui/src/lib.rs` |
 
 ## À faire
+
+- **Fenêtres sur le 2e écran** : les panneaux flottants restent dans la fenêtre principale (limite connue de
+  FilmCraft, ticket #466, estimée à 20–35 h). À traiter quand on aura les retours sur le reste.
+- **Textes qui débordent** sur certains paramètres : à repérer panneau par panneau (captures de Rémi).
+- **Indicateur de chargement** des longs rushs au-delà des formes d'onde (index, miniatures) si la lenteur persiste.
+- Synchronisation par l'heure de début des fichiers OBS (le nom de fichier contient l'heure) en plus de la
+  synchronisation audio, si celle-ci échoue sur les rushs Minecraft.
+- Un test de FilmCraft échoue déjà sans les modifications de RECut :
+  `nest_editing_tests::with_the_toggle_off_a_sequence_edits_in_as_its_clips_with_their_transitions`.
 
 - Icône d'application RECut (aujourd'hui celle de FilmCraft) : à dessiner par Rémi, dans la DA RECorbs.
 - Écran d'accueil et menu Aide : ils pointent encore vers la communauté ArtCraft (Discord, site).
