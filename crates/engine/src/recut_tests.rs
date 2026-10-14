@@ -412,3 +412,93 @@ fn balance_follows_the_roles_given_and_rejects_bad_ones() {
     let g = s.project.sequence(src).unwrap().audio_tracks[1].items[0].gain_db;
     assert!(g.is_finite() && g.abs() <= 40.0);
 }
+
+// ---------------------------------------------------------------- Apply POV Overlays
+
+/// The stacked cameras nested as multi-camera on V1 and cut every 12 frames: Zenh 0–12, Screu
+/// 12–24, Zenh 24–36, Screu 36–48. Returns the session, the source and two overlay items.
+fn cut_multicam() -> (Session, ItemId, ItemId, ItemId) {
+    let (mut s, _) = stacked();
+    let r = s.execute("recut.nestMulticam", json!({})).unwrap();
+    let src = ItemId(r["sequence"].as_u64().unwrap());
+    for (frame, cam) in [(12, 2), (24, 1), (36, 2)] {
+        s.execute(&format!("multicam.cutToCamera{cam}"), json!({"frame": frame})).unwrap();
+    }
+    let mut p = (*s.project).clone();
+    let zenh_tag = media(&mut p, "tag zenh", 1);
+    let screu_tag = media(&mut p, "tag screu", 1);
+    s.project = Arc::new(p);
+    (s, src, zenh_tag, screu_tag)
+}
+
+/// (start frame, end frame, item) of the clips on video track `ti`.
+fn row(s: &Session, ti: usize) -> Vec<(i64, i64, ItemId)> {
+    let q = s.active_sequence().unwrap();
+    q.video_tracks[ti].items.iter().map(|i| (RATE.frame_at(i.start), RATE.frame_at(i.end()), i.item)).collect()
+}
+
+fn overlay(s: &mut Session, item: ItemId, from: i64, to: i64, track: usize) {
+    let (v, _) = tracks(s);
+    let range = TimeRange::new(Tick::ZERO, RATE.tick_of(to - from));
+    crate::commands::place_item(s, item, range, RATE.tick_of(from), Some(v[track]), None, false, "test", None).unwrap();
+}
+
+#[test]
+fn pov_overlays_copy_each_cameras_model_onto_its_segments() {
+    let (mut s, src, zenh_tag, screu_tag) = cut_multicam();
+    let segs = crate::recut_overlays::segments(&s.active_sequence().unwrap().video_tracks[0].items, src);
+    let angles: Vec<(i64, i64, u32)> = segs.iter().map(|g| (RATE.frame_at(g.start), RATE.frame_at(g.end), g.angle)).collect();
+    assert_eq!(angles, [(0, 12, 0), (12, 24, 1), (24, 36, 0), (36, 48, 1)]);
+    // models: Zenh's tag over his whole first segment, Screu's over his
+    overlay(&mut s, zenh_tag, 0, 12, 1);
+    overlay(&mut s, screu_tag, 12, 24, 1);
+    s.set_playhead(Tick::ZERO);
+    let r = s.execute("recut.povOverlays", json!({})).unwrap();
+    assert_eq!((r["placed"].as_u64(), r["skipped"].as_u64()), (Some(2), Some(0)), "{r}");
+    assert_eq!(row(&s, 1), [(0, 12, zenh_tag), (12, 24, screu_tag), (24, 36, zenh_tag), (36, 48, screu_tag)]);
+    // re-cut: 36–48 now shows Zenh too, so 24–48 is one Zenh segment; running again follows it
+    s.execute("multicam.switchAngle", json!({"camera": 1, "frame": 40})).unwrap();
+    let r = s.execute("recut.povOverlays", json!({})).unwrap();
+    assert_eq!((r["replaced"].as_u64(), r["placed"].as_u64()), (Some(2), Some(1)), "{r}");
+    assert_eq!(row(&s, 1), [(0, 12, zenh_tag), (12, 24, screu_tag), (24, 48, zenh_tag)]);
+    // one undo step per run
+    s.execute("edit.undo", json!({})).unwrap();
+    assert_eq!(row(&s, 1).len(), 4);
+}
+
+#[test]
+fn pov_overlays_keep_a_short_models_offset_and_never_cover_other_clips() {
+    let (mut s, _, zenh_tag, screu_tag) = cut_multicam();
+    // a 4-frame pop-up 2 frames into Zenh's first segment
+    overlay(&mut s, zenh_tag, 2, 6, 2);
+    // a clip of the user's own where the copy would go (Zenh's second segment, 26–30)
+    let mut p = (*s.project).clone();
+    let other = media(&mut p, "sticker", 1);
+    s.project = Arc::new(p);
+    overlay(&mut s, other, 25, 27, 2);
+    s.set_playhead(Tick::ZERO);
+    let r = s.execute("recut.povOverlays", json!({})).unwrap();
+    assert_eq!((r["placed"].as_u64(), r["skipped"].as_u64()), (Some(0), Some(1)), "{r}");
+    assert_eq!(r["camerasWithoutOverlay"], json!(["screu"]));
+    assert_eq!(row(&s, 2), [(2, 6, zenh_tag), (25, 27, other)], "the user's clip is untouched");
+    // without the obstacle the pop-up lands 2 frames into the segment, 4 frames long
+    let q = s.active_sequence().unwrap().clone();
+    let obstacle = q.video_tracks[2].items[1].id.0;
+    s.execute("timeline.select", json!({"clips": [obstacle]})).unwrap();
+    s.execute("edit.clear", json!({})).unwrap();
+    s.set_playhead(Tick::ZERO);
+    s.execute("recut.povOverlays", json!({})).unwrap();
+    assert_eq!(row(&s, 2), [(2, 6, zenh_tag), (26, 30, zenh_tag)]);
+    let _ = screu_tag;
+}
+
+#[test]
+fn pov_overlays_need_a_model_and_a_multicam_clip() {
+    let (mut s, _, _, _) = cut_multicam();
+    s.set_playhead(Tick::ZERO);
+    let e = s.execute("recut.povOverlays", json!({})).unwrap_err().to_string();
+    assert!(e.contains("dress one stretch"), "{e}");
+    let (mut s, _) = stacked();
+    assert!(s.execute("recut.povOverlays", json!({})).is_err(), "no multi-camera clip");
+    assert!(s.execute("recut.povOverlays", json!({"clip": 987_654_321u64})).is_err());
+}

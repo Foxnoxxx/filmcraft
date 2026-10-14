@@ -212,3 +212,20 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
     }
     ctx.data_mut(|m| m.insert_temp(draft_id(), d));
 }
+
+/// RECut: the status-bar line for Apply POV Overlays' result.
+pub fn overlays_status(v: &Value) -> String {
+    let n = |k: &str| v[k].as_u64().unwrap_or(0);
+    let mut line = format!("Habillages posés : {}", n("placed"));
+    if n("replaced") > 0 {
+        line += &format!(" ({} remplacé(s))", n("replaced"));
+    }
+    if n("skipped") > 0 {
+        line += &format!(" · {} tranche(s) ignorée(s) : un clip occupe déjà la place", n("skipped"));
+    }
+    let missing: Vec<&str> = v["camerasWithoutOverlay"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    if !missing.is_empty() {
+        line += &format!(" · sans modèle : {}", missing.join(", "));
+    }
+    line
+}

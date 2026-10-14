@@ -45,6 +45,8 @@ pub mod proxies;
 pub mod recut;
 // RECut: Balance Multi-Camera Sound (RECUT.md).
 pub mod recut_balance;
+// RECut: Apply POV Overlays (RECUT.md).
+pub mod recut_overlays;
 pub mod relink;
 pub mod remix;
 pub mod scene_detect;

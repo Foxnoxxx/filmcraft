@@ -224,3 +224,48 @@ fn balance_dialog_analyses_the_tracks_and_applies_the_roles() {
     d.frames(3);
     assert!(!d.has("balance.cancel"));
 }
+
+#[test]
+fn clip_menu_applies_pov_overlays() {
+    use filmcraft_project::{ItemKind, Label, MediaClip, MediaRef, TrackKind};
+    use filmcraft_time::{FrameRate, Tick, TimeRange};
+    let (mut d, clip, _) = multicam_driver();
+    // cut: zenh 0–12, screu 12–24, zenh 24–36, screu 36–48
+    for (frame, cam) in [(12, 2), (24, 1), (36, 2)] {
+        d.exec(&format!("multicam.cutToCamera{cam}"), json!({"frame": frame}));
+    }
+    // a model overlay over Zenh's first stretch, on V2
+    let rate = FrameRate::FPS_24;
+    {
+        use filmcraft_media::MediaSource;
+        let s = &mut d.harness.state_mut().session;
+        let seq = s.state.active_sequence.unwrap();
+        let mut p = (*s.project).clone();
+        let src = filmcraft_media::generators::GeneratorSource::new(filmcraft_media::Generator::BarsAndTone, 64, 36, rate, rate.tick_of(48));
+        let info = src.info().clone();
+        let media = MediaClip {
+            media: MediaRef::Generator(filmcraft_media::Generator::BarsAndTone),
+            info,
+            interpret: Default::default(),
+            mark_in: None,
+            mark_out: None,
+            markers: vec![],
+            offline: false,
+            proxy: None,
+            identity: None,
+        };
+        let tag = p.add_item("tag zenh", Label::Iris, ItemKind::Media(media), None);
+        let ti = p.make_track_item(tag, TrackKind::Video, Tick::ZERO, TimeRange::new(Tick::ZERO, rate.tick_of(12)), rate).unwrap();
+        p.sequence_mut(seq).unwrap().video_tracks[1].items.push(ti);
+        s.project = std::sync::Arc::new(p);
+    }
+    d.frames(3);
+    d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
+    d.frames(3);
+    d.click("timeline.clipMenu.recut.povOverlays");
+    let s = &d.harness.state().session;
+    let v2: Vec<i64> = s.active_sequence().unwrap().video_tracks[1].items.iter().map(|i| rate.frame_at(i.start)).collect();
+    assert_eq!(v2, [0, 24], "Zenh's overlay copied onto his second stretch");
+    let status = d.harness.state().ui.status.clone();
+    assert!(status.starts_with("Habillages posés : 1") && status.contains("sans modèle : screu"), "{status}");
+}

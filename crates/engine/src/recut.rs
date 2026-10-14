@@ -2,6 +2,7 @@
 //!
 //! | Id | Menu | |
 //! |---|---|---|
+//! | `recut.povOverlays` | Clip ▸ Apply POV Overlays | see [`crate::recut_overlays`] |
 //! | `recut.balanceMulticam` | Clip ▸ Balance Multi-Camera Sound… | see [`crate::recut_balance`] |
 //! | `recut.nestMulticam` | Clip ▸ Nest as Multi-Camera | clips already in sync, stacked on several video tracks → a multi-camera source sequence (one camera per video track, with the sound linked to it) replaced by one multi-camera clip whose sound switches with the angle |
 //!
@@ -25,6 +26,7 @@ const NEST_MULTICAM: &str = "recut.nestMulticam";
 pub fn commands() -> Vec<CommandSpec> {
     let mut v = nest_commands();
     v.extend(crate::recut_balance::commands());
+    v.extend(crate::recut_overlays::commands());
     v
 }
 

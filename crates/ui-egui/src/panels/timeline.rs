@@ -1974,6 +1974,8 @@ pub(crate) const CLIP_MENU: &[&[(&str, &str)]] = &[
         ("Nest as Multi-Camera", "recut.nestMulticam"),
         // RECut: measure the multi-camera clip's tracks and set each one's level (RECUT.md)
         ("Balance Multi-Camera Sound…", "recut.balanceMulticam"),
+        // RECut: copy each camera's overlay onto all its stretches (RECUT.md)
+        ("Apply POV Overlays", "recut.povOverlays"),
         ("Make Subsequence", "sequence.makeSubsequence"),
         ("Reveal Nested Sequence", "sequence.revealNested"),
         ("Multi-Camera", "clip.multicam"),
@@ -2825,6 +2827,8 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                                 let _ = app.session.execute("timeline.select", json!({"clips": [clip.0]}));
                             }
                         }
+                        // RECut: say what Apply POV Overlays did (RECUT.md)
+                        Ok(v) if cmd == "recut.povOverlays" => app.ui.status = crate::panels::recut_balance::overlays_status(&v),
                         Ok(_) => {}
                         Err(e) => app.ui.status = e,
                     }

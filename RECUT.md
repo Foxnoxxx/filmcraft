@@ -40,6 +40,14 @@ dont les règles (zéro plantage, aucun asset Adobe, contrôles qualité) s'appl
 6. **Mêmes exigences que FilmCraft** : zéro plantage (`AGENTS.md` §0), contrôles qualité verts avant
    chaque envoi, un test pour chaque fonctionnalité.
 
+## Piloter RECut avec Claude
+
+1. Lancer `RECut avec Claude.bat` (RECut écoute alors sur `127.0.0.1:9876`, en local uniquement).
+2. Déclarer le pont MCP dans l'application Claude pour ordinateur :
+   `{"mcpServers": {"recut": {"command": "<dossier RECut>\\filmcraft-cli.exe", "args": ["mcp", "--bridge", "127.0.0.1:9876"]}}}`.
+3. Dans une conversation liée à l'ordinateur, Claude voit les outils de RECut (commandes, clics,
+   captures du moniteur Programme) et peut monter en direct. Détails : `docs/agents.md`.
+
 ## Mettre RECut à jour avec FilmCraft
 
 ```sh
@@ -69,6 +77,8 @@ les secrets de signature d'ArtCraft).
 | 2026-10-13 | Formes d'onde audio : au plus 2 flux analysés à la fois, analyse en pause pendant la lecture, avancement affiché dans la barre d'état (avant : tous les flux décodés en même temps, lecture saccadée sur de longs rushs) | `ui-egui/src/panels/timeline.rs`, `ui-egui/src/lib.rs` |
 | 2026-10-14 | **Équilibrer le son multicam…** (`recut.balanceMulticam`, clic droit sur un clip multicam) : mesure chaque piste son de la source (LUFS échantillonnés, sans le gain de clip), repère les pistes « mixage OBS » (piste = somme des autres, par moindres carrés) et les pistes vides, propose un rôle par piste (voix = la plus faible d'une caméra, jeu, voix + jeu, coupée, inchangée) ; applique : gain de clip vers la cible (voix -20 LUFS, jeu 8 dB dessous, voix + jeu à mi-chemin), passe-haut 80 Hz sur la voix, compresseur par piste, limiteur -1 dB sur le mixage de la source. Les effets gérés sont mis à jour, pas empilés. Boîte avec analyse en arrière-plan | `crates/engine/src/recut_balance.rs`, `recut_tests.rs`, `ui-egui/src/panels/recut_balance.rs`, `menus.rs`, `panels/dialogs.rs`, `panels/timeline.rs`, `tests/recut_ui.rs`, catalogues `i18n/*.tsv` |
 | 2026-10-14 | Imbriquer en multicaméra : position du Mouvement en nombres (Propriétés affichait « NaN ») ; pistes son nommées d'après la caméra (« zenh 1 », « zenh 2 ») | `crates/engine/src/recut.rs` |
+| 2026-10-14 | **Appliquer les habillages des POV** (`recut.povOverlays`, clic droit sur le clip multicam) : l'habillage posé à la main sur la première tranche de chaque caméra (pistes vidéo au-dessus du multicam) est le modèle ; il est copié sur toutes les autres tranches de la caméra (étiré s'il couvrait toute la tranche, sinon même décalage et même durée). Relancer après un nouveau découpage remplace les copies ; un clip modifié par l'utilisateur, le modèle et les clips en place ne sont jamais touchés | `crates/engine/src/recut_overlays.rs`, `recut_tests.rs`, `ui-egui/src/panels/timeline.rs`, `panels/recut_balance.rs`, `tests/recut_ui.rs`, catalogues `i18n/*.tsv` |
+| 2026-10-14 | `RECut avec Claude.bat` dans le zip : lance RECut avec son canal de contrôle (port 9876) pour que Claude le pilote via le pont MCP | `.github/workflows/recut-windows.yml` |
 
 ## À faire
 

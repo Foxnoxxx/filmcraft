@@ -75,6 +75,9 @@ jobs:
           New-Item -ItemType Directory -Force -Path $dir | Out-Null
           Copy-Item "$bin\filmcraft.exe" "$dir\RECut.exe"
           Copy-Item "$bin\filmcraft-cli.exe" "$dir\filmcraft-cli.exe"
+          # RECut started with its control channel, so Claude can drive it through the MCP bridge
+          # (filmcraft-cli.exe mcp --bridge 127.0.0.1:9876; see RECUT.md)
+          Set-Content -Encoding ascii -Path "$dir\RECut avec Claude.bat" -Value @('@echo off', 'start "" "%~dp0RECut.exe" --control 9876')
           foreach ($f in 'RECUT.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE', 'ATTRIBUTION.md') { Copy-Item $f $dir }
           & "$dir\filmcraft-cli.exe" --version
           if ($LASTEXITCODE -ne 0) { throw 'filmcraft-cli --version failed' }
