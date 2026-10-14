@@ -1767,6 +1767,8 @@ impl FilmcraftApp {
         // RECut: waveform analysis pauses while the timeline plays (RECUT.md)
         #[cfg(not(target_arch = "wasm32"))]
         panels::timeline::peak_throttle::set_playing(self.playback.playing);
+        // RECut: the watch folder imports new rushs (RECUT.md)
+        panels::recut_watch::tick(self, &ctx);
         if !self.ui.show_status_bar {
             // no bar to draw the job in, but a finished preview render still plays
             self.watch_jobs(ui.ctx());
@@ -1831,8 +1833,7 @@ impl FilmcraftApp {
                 let what = if self.playback.playing { "en pause pendant la lecture" } else { "en cours" };
                 let text = format!("Analyse audio des formes d'onde : {n} piste(s) {what}…");
                 let at = egui::pos2(sb.max.x - 10.0, sb.center().y);
-                let r = ui.painter().text(at, egui::Align2::RIGHT_CENTER, text.clone(), Tokens::ui(11.0), t.text_dim);
-                self.auto.add("status.waveforms", r, &text);
+                ui.painter().text(at, egui::Align2::RIGHT_CENTER, text, Tokens::ui(11.0), t.text_dim);
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
             }
             return;

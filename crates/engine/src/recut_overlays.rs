@@ -51,7 +51,7 @@ pub struct Segment {
 
 /// The multi-camera picture track and source the command works on: the clip given as `clip`, else
 /// a selected multi-camera picture clip, else the one at the playhead.
-fn target(s: &Session, p: &Value) -> Option<(usize, ItemId)> {
+pub(crate) fn target(s: &Session, p: &Value) -> Option<(usize, ItemId)> {
     let q = s.active_sequence()?;
     let is_mc = |it: &TrackItem| it.multicam.is_some_and(|m| m.enabled) && s.project.sequence(it.item).is_some();
     let find = |c: ClipId| q.video_tracks.iter().enumerate().find_map(|(ti, t)| t.item(c).filter(|it| is_mc(it)).map(|it| (ti, it.item)));

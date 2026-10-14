@@ -1,6 +1,7 @@
 //! RECut: UI tests of the RECut additions (RECUT.md): the timeline clip menu's audio settings,
-//! Nest as Multi-Camera and Balance Multi-Camera Sound, and the search field of the Graphics font
-//! list. With `RECUT_UI_SHOTS=<dir>` the balance dialog is also rendered (wgpu) to a PNG there.
+//! Nest as Multi-Camera, Balance Multi-Camera Sound, Apply POV Overlays, Mark Dead Time and the watch
+//! folder, and the search field of the Graphics font list. With `RECUT_UI_SHOTS=<dir>` the balance and dead-time
+//! dialogs are also rendered (wgpu) to PNGs there.
 
 use std::sync::mpsc::{Sender, channel};
 
@@ -88,8 +89,13 @@ fn clip_menu_offers_audio_settings_and_nest_as_multicam() {
     d.harness.state_mut().session.state.project_selection = vec![item];
     d.ok("ui.click", json!({"id": format!("timeline.clip.{audio}"), "button": "right"}));
     d.frames(3);
-    for id in ["timeline.clipMenu.clip.audioGain", "timeline.clipMenu.clip.audioChannels", "timeline.clipMenu.recut.nestMulticam"] {
+    for id in ["timeline.clipMenu.clip.audioGain", "timeline.clipMenu.clip.audioChannels", "timeline.clipMenu.recut.menu"] {
         assert!(d.has(id), "{id} in the clip menu");
+    }
+    // RECut's commands are in their own submenu
+    d.click("timeline.clipMenu.recut.menu");
+    for id in ["recut.nestMulticam", "recut.balanceMulticam", "recut.povOverlays", "recut.markDeadTime"] {
+        assert!(d.has(&format!("timeline.clipMenu.{id}")), "{id} in Clip menu ▸ RECut");
     }
     d.click("timeline.clipMenu.clip.audioChannels");
     // timeline mode: one row of source channels; untick channel 2 → mono from channel 1
@@ -186,6 +192,7 @@ fn balance_dialog_analyses_the_tracks_and_applies_the_roles() {
     assert_eq!(tracks.len(), 2);
     d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
     d.frames(3);
+    d.click("timeline.clipMenu.recut.menu");
     d.click("timeline.clipMenu.recut.balanceMulticam");
     // the analysis runs in the background; the role buttons appear when it is done
     let row = format!("balance.{}.voice", tracks[0]);
@@ -218,6 +225,7 @@ fn balance_dialog_analyses_the_tracks_and_applies_the_roles() {
     // Escape closes the dialog without changing anything
     d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
     d.frames(3);
+    d.click("timeline.clipMenu.recut.menu");
     d.click("timeline.clipMenu.recut.balanceMulticam");
     assert!(d.has("balance.cancel"));
     d.ok("ui.key", json!({"key": "Escape"}));
@@ -262,10 +270,151 @@ fn clip_menu_applies_pov_overlays() {
     d.frames(3);
     d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
     d.frames(3);
+    d.click("timeline.clipMenu.recut.menu");
     d.click("timeline.clipMenu.recut.povOverlays");
     let s = &d.harness.state().session;
     let v2: Vec<i64> = s.active_sequence().unwrap().video_tracks[1].items.iter().map(|i| rate.frame_at(i.start)).collect();
     assert_eq!(v2, [0, 24], "Zenh's overlay copied onto his second stretch");
     let status = d.harness.state().ui.status.clone();
     assert!(status.starts_with("Habillages posés : 1") && status.contains("sans modèle : screu"), "{status}");
+}
+
+#[test]
+fn dead_time_dialog_marks_and_the_menu_removes() {
+    let (mut d, clip, src) = multicam_driver();
+    let src = filmcraft_project::ItemId(src);
+    // Screu's sound is silenced (clip gain −100 dB): with Zenh's tone unticked, nobody talks
+    let tracks: Vec<u64> = {
+        let s = &mut d.harness.state_mut().session;
+        let mut p = (*s.project).clone();
+        let q = p.sequence_mut(src).unwrap();
+        for it in &mut q.audio_tracks[1].items {
+            it.gain_db = -100.0;
+        }
+        let t = q.audio_tracks.iter().map(|t| t.id.0).collect();
+        s.project = std::sync::Arc::new(p);
+        t
+    };
+    d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
+    d.frames(3);
+    d.click("timeline.clipMenu.recut.menu");
+    d.click("timeline.clipMenu.recut.markDeadTime");
+    // the tracks are listened to in the background; their checkboxes appear when it is done
+    let zenh = format!("deadtime.track.{}", tracks[0]);
+    let mut ready = false;
+    for _ in 0..200 {
+        if d.has(&zenh) {
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(ready, "analysis finished");
+    // Zenh's bars and tone never stop: no dead time while his track is ticked
+    assert!(d.has("deadtime.ok"));
+    d.click("deadtime.ok");
+    assert!(d.has("deadtime.ok"), "nothing to mark: the dialog stays");
+    d.click(&zenh);
+    // the 2-second recording is shorter than the 3-second minimum: type 1 s
+    d.click("deadtime.min");
+    d.ok("ui.key", json!({"key": "A", "modifiers": ["command"]}));
+    d.ok("ui.type", json!({"text": "1"}));
+    d.ok("ui.key", json!({"key": "Enter"}));
+    d.frames(3);
+    if let Some(dir) = std::env::var_os("RECUT_UI_SHOTS").map(std::path::PathBuf::from) {
+        d.frames(6);
+        let img = d.harness.render().expect("wgpu render");
+        std::fs::create_dir_all(&dir).unwrap();
+        img.save(dir.join("deadtime-dialog.png")).unwrap();
+    }
+    d.click("deadtime.range.0");
+    d.click("deadtime.ok");
+    assert!(!d.has("deadtime.ok"), "dialog closed: {}", d.harness.state().ui.status);
+    let status = d.harness.state().ui.status.clone();
+    assert!(status.starts_with("Temps morts marqués : 1 (2,0 s)"), "{status}");
+    let markers: Vec<String> = d.harness.state().session.active_sequence().unwrap().markers.iter().map(|m| m.name.clone()).collect();
+    assert_eq!(markers, ["Temps mort"]);
+    // Sequence ▸ Remove Marked Dead Time: the whole (silent) edit goes
+    d.ok("ui.menu.invoke", json!({"id": "recut.removeDeadTime"}));
+    d.frames(3);
+    let status = d.harness.state().ui.status.clone();
+    assert!(status.starts_with("Temps morts supprimés : 1 passage(s), 2,0 s"), "{status}");
+    assert!(d.harness.state().session.active_sequence().unwrap().markers.is_empty());
+}
+
+/// A 16-bit mono WAV of `seconds` of a quiet tone.
+fn wav(seconds: f64) -> Vec<u8> {
+    let rate = 48_000u32;
+    let n = (seconds * rate as f64) as u32;
+    let mut b = Vec::new();
+    b.extend(b"RIFF");
+    b.extend((36 + n * 2).to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(rate.to_le_bytes());
+    b.extend((rate * 2).to_le_bytes());
+    b.extend(2u16.to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend((n * 2).to_le_bytes());
+    for i in 0..n {
+        let v = ((i as f64 * 440.0 * std::f64::consts::TAU / rate as f64).sin() * 3000.0) as i16;
+        b.extend(v.to_le_bytes());
+    }
+    b
+}
+
+#[test]
+fn watch_folder_imports_new_rushs_into_their_bin() {
+    let mut d = Driver::demo();
+    let root = std::env::temp_dir().join(format!("recut-ui-watch-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("swisstransfer_2bfc")).unwrap();
+    std::fs::write(root.join("old.wav"), wav(0.2)).unwrap();
+    // File ▸ Watch Folder… opens the dialog
+    d.ok("ui.menu.invoke", json!({"id": "recut.watchFolder"}));
+    assert!(d.has("watch.enabled") && d.has("watch.choose"));
+    d.click("watch.close");
+    assert!(!d.has("watch.enabled"));
+    // an agent sets it directly (not saved here; short delays for the test)
+    let dir = root.to_string_lossy().into_owned();
+    let r = d.exec("recut.watchFolder", json!({"dir": dir, "enabled": true, "persist": false, "quietSeconds": 0, "pollSeconds": 0.05}));
+    assert_eq!(r["enabled"], true);
+    assert!(
+        d.call("engine.execute", json!({"command": "recut.watchFolder", "params": {"dir": "/no/such/folder", "enabled": true, "persist": false}}))["ok"]
+            == false
+    );
+    // let the first look see what is already there, then a POV arrives
+    d.frames(20);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    d.frames(5);
+    std::fs::write(root.join("swisstransfer_2bfc").join("2026-05-20 15-40-35.wav"), wav(0.5)).unwrap();
+    let named = |d: &Driver, n: &str| d.harness.state().session.project.items.values().any(|i| i.name.starts_with(n));
+    let mut imported = false;
+    for _ in 0..300 {
+        d.frames(2);
+        if named(&d, "2026-05-20 15-40-35") {
+            imported = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(imported, "the new POV is imported: {}", d.harness.state().ui.status);
+    let status = d.harness.state().ui.status.clone();
+    assert_eq!(status, "Dossier de veille : rushs importés, 1 dans « swisstransfer_2bfc »");
+    assert!(!named(&d, "old"), "what was there before is left alone");
+    let project = &d.harness.state().session.project;
+    let bin = project.root.children.iter().find_map(|e| match e {
+        filmcraft_project::BinEntry::Bin(b) if b.name == "swisstransfer_2bfc" => Some(b.clone()),
+        _ => None,
+    });
+    assert_eq!(bin.map(|b| b.children.len()), Some(1), "in its transfer's bin");
+    // imported once
+    let count = project.items.len();
+    d.frames(30);
+    assert_eq!(d.harness.state().session.project.items.len(), count);
+    d.exec("recut.watchFolder", json!({"enabled": false}));
+    let _ = std::fs::remove_dir_all(&root);
 }

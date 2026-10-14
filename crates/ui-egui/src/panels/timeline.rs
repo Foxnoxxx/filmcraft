@@ -1952,6 +1952,19 @@ fn marker_menu(app: &mut FilmcraftApp, ctx: &egui::Context, ui: &mut egui::Ui, m
     }
 }
 
+/// RECut: the clip menu's RECut submenu (RECUT.md): its entry in [`CLIP_MENU`] and its commands.
+pub(crate) const RECUT_MENU: &str = "recut.menu";
+pub(crate) const RECUT_CLIP_COMMANDS: &[(&str, &str)] = &[
+    // clips in sync on several video tracks → one multi-camera clip whose sound follows the angle
+    ("Nest as Multi-Camera", "recut.nestMulticam"),
+    // measure the multi-camera clip's tracks and set each one's level
+    ("Balance Multi-Camera Sound…", "recut.balanceMulticam"),
+    // copy each camera's overlay onto all its stretches
+    ("Apply POV Overlays", "recut.povOverlays"),
+    // find the stretches where nobody talks
+    ("Mark Dead Time…", "recut.markDeadTime"),
+];
+
 pub(crate) const CLIP_MENU: &[&[(&str, &str)]] = &[
     &[
         ("Cut", "edit.cut"),
@@ -1970,12 +1983,8 @@ pub(crate) const CLIP_MENU: &[&[(&str, &str)]] = &[
         ("Synchronize…", "clip.synchronize"),
         ("Merge Clips…", "clip.mergeClips"),
         ("Nest…", "clip.nest"),
-        // RECut: clips in sync on several video tracks → one multi-camera clip whose sound follows the angle
-        ("Nest as Multi-Camera", "recut.nestMulticam"),
-        // RECut: measure the multi-camera clip's tracks and set each one's level (RECUT.md)
-        ("Balance Multi-Camera Sound…", "recut.balanceMulticam"),
-        // RECut: copy each camera's overlay onto all its stretches (RECUT.md)
-        ("Apply POV Overlays", "recut.povOverlays"),
+        // RECut: RECut's clip commands, in one submenu so the menu still fits the screen (RECUT.md)
+        ("RECut", RECUT_MENU),
         ("Make Subsequence", "sequence.makeSubsequence"),
         ("Reveal Nested Sequence", "sequence.revealNested"),
         ("Multi-Camera", "clip.multicam"),
@@ -2092,6 +2101,32 @@ fn gap_menu(app: &mut FilmcraftApp, ctx: &egui::Context, ui: &mut egui::Ui) {
 
 /// The clip menu's Multi-Camera submenu: Enable, Flatten, and the cameras of the selected nested
 /// sequence clips (greyed out when none of the selected clips is a nested sequence).
+/// RECut: Clip menu ▸ RECut (RECUT.md). The items keep their `timeline.clipMenu.<command>` ids.
+fn recut_menu(app: &mut FilmcraftApp, ctx: &egui::Context, ui: &mut egui::Ui, any: bool) {
+    let mut run: Option<&str> = None;
+    ui.add_enabled_ui(any, |ui| {
+        let r = ui.menu_button("RECut", |ui| {
+            for &(label, cmd) in RECUT_CLIP_COMMANDS {
+                let label = crate::i18n::t(label);
+                let r = ui.add_enabled(app.session.is_enabled(cmd), egui::Button::new(label));
+                app.auto.add(&format!("timeline.clipMenu.{cmd}"), r.rect, label);
+                if r.clicked() {
+                    run = Some(cmd);
+                }
+            }
+        });
+        app.auto.add(&format!("timeline.clipMenu.{RECUT_MENU}"), r.response.rect, "RECut");
+    });
+    let Some(cmd) = run else { return };
+    match crate::menus::invoke(app, ctx, cmd, json!({})) {
+        // say what Apply POV Overlays did
+        Ok(v) if cmd == "recut.povOverlays" => app.ui.status = crate::panels::recut_balance::overlays_status(&v),
+        Ok(_) => {}
+        Err(e) => app.ui.status = e,
+    }
+    ui.close();
+}
+
 fn multicam_menu(app: &mut FilmcraftApp, ui: &mut egui::Ui, picked: &[&TrackItem]) {
     let nests: Vec<&TrackItem> = picked.iter().copied().filter(|it| app.session.project.sequence(it.item).is_some()).collect();
     let enabled = !nests.is_empty() && nests.iter().all(|it| it.multicam.is_some_and(|m| m.enabled));
@@ -2803,6 +2838,10 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                     multicam_menu(app, ui, &picked);
                     continue;
                 }
+                if cmd == RECUT_MENU {
+                    recut_menu(app, &ctx, ui, !sel.is_empty());
+                    continue;
+                }
                 let label = match cmd {
                     "clip.enable" if all_enabled => tl!("✓ Enable"),
                     "clip.link" if linked => tl!("Unlink"),
@@ -2827,8 +2866,6 @@ fn interact(app: &mut FilmcraftApp, ui: &mut egui::Ui, seq: &Sequence, layout: &
                                 let _ = app.session.execute("timeline.select", json!({"clips": [clip.0]}));
                             }
                         }
-                        // RECut: say what Apply POV Overlays did (RECUT.md)
-                        Ok(v) if cmd == "recut.povOverlays" => app.ui.status = crate::panels::recut_balance::overlays_status(&v),
                         Ok(_) => {}
                         Err(e) => app.ui.status = e,
                     }

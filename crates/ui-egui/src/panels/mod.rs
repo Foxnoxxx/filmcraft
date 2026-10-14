@@ -45,6 +45,10 @@ pub mod text;
 pub mod timecode;
 // RECut: Balance Multi-Camera Sound dialog (RECUT.md).
 pub mod recut_balance;
+// RECut: Mark Dead Time dialog (RECUT.md).
+pub mod recut_deadtime;
+// RECut: watch folder (RECUT.md).
+pub mod recut_watch;
 pub mod timeline;
 pub mod timeline_automation;
 pub mod timeline_captions;

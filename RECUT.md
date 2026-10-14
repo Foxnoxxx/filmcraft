@@ -79,6 +79,9 @@ les secrets de signature d'ArtCraft).
 | 2026-10-14 | Imbriquer en multicaméra : position du Mouvement en nombres (Propriétés affichait « NaN ») ; pistes son nommées d'après la caméra (« zenh 1 », « zenh 2 ») | `crates/engine/src/recut.rs` |
 | 2026-10-14 | **Appliquer les habillages des POV** (`recut.povOverlays`, clic droit sur le clip multicam) : l'habillage posé à la main sur la première tranche de chaque caméra (pistes vidéo au-dessus du multicam) est le modèle ; il est copié sur toutes les autres tranches de la caméra (étiré s'il couvrait toute la tranche, sinon même décalage et même durée). Relancer après un nouveau découpage remplace les copies ; un clip modifié par l'utilisateur, le modèle et les clips en place ne sont jamais touchés | `crates/engine/src/recut_overlays.rs`, `recut_tests.rs`, `ui-egui/src/panels/timeline.rs`, `panels/recut_balance.rs`, `tests/recut_ui.rs`, catalogues `i18n/*.tsv` |
 | 2026-10-14 | `RECut avec Claude.bat` dans le zip : lance RECut avec son canal de contrôle (port 9876) pour que Claude le pilote via le pont MCP | `.github/workflows/recut-windows.yml` |
+| 2026-10-14 | **Temps morts** : Séquence ▸ **Marquer les temps morts…** (`recut.markDeadTime`, aussi au clic droit sur le clip multicam) écoute les pistes de voix de la source multicam (ou les pistes audio de la séquence) et repère les passages où personne ne parle (≥ 3 s, 0,5 s gardée après la parole, 0,3 s avant) ; la boîte de dialogue mesure une fois en arrière-plan (plusieurs pistes à la fois), puis chaque réglage et chaque piste cochée recalcule tout de suite ; un clic sur un temps mort y place la tête de lecture ; « Poser les marqueurs » pose un marqueur rose « Temps mort » par passage, dans le montage (à travers les clips multicam). Séquence ▸ **Supprimer les temps morts marqués** (`recut.removeDeadTime`) supprime avec raccord ce que couvrent les marqueurs restants. Seuils réglés sur les enregistrements OBS du 2026-05-20 | `crates/engine/src/recut_deadtime.rs`, `recut.rs`, `recut_overlays.rs`, `recut_tests.rs`, `lib.rs`, `ui-egui/src/panels/recut_deadtime.rs`, `menus.rs`, `panels/dialogs.rs`, `panels/timeline.rs`, `tests/recut_ui.rs`, catalogues `i18n/*.tsv` |
+| 2026-10-14 | **Dossier de veille** : Fichier ▸ **Dossier de veille…** (`recut.watchFolder`) : RECut surveille un dossier (et ses sous-dossiers) et importe chaque nouveau média dès qu'il est complet (taille et date inchangées depuis 10 s, sur deux passages), dans un chutier au nom de son sous-dossier (dossier SwissTransfer, dossier du projet), sinon « Rushs <date OBS> » ; les fichiers déjà là au démarrage de la veille et ceux déjà dans le projet sont laissés de côté. Réglage gardé dans `recut-watch.json` (dossier de données RECut) ; recherche en arrière-plan toutes les 3 s | `crates/engine/src/recut_watch.rs`, `lib.rs`, `recut_tests.rs`, `ui-egui/src/panels/recut_watch.rs`, `menus.rs`, `lib.rs`, `panels/dialogs.rs`, `tests/recut_ui.rs`, catalogues `i18n/*.tsv` |
+| 2026-10-14 | Clic droit sur un clip : les commandes RECut (Imbriquer en multicaméra, Équilibrer le son, Habillages des POV, Temps morts) sont regroupées dans un sous-menu **RECut** : le menu, devenu plus haut que l'écran sur une fenêtre de moins de 1000 px, tient de nouveau (« Afficher dans le projet », en bas, était inaccessible). L'indication « Analyse audio des formes d'onde » n'est plus un élément d'automatisation (elle faussait la mesure de la zone des panneaux) | `ui-egui/src/panels/timeline.rs`, `ui-egui/src/lib.rs`, `tests/recut_ui.rs`, catalogues `i18n/*.tsv` |
 
 ## À faire
 
@@ -86,8 +89,17 @@ les secrets de signature d'ArtCraft).
   FilmCraft, ticket #466, estimée à 20–35 h). À traiter quand on aura les retours sur le reste.
 - **Textes qui débordent** sur certains paramètres : à repérer panneau par panneau (captures de Rémi).
 - **Indicateur de chargement** des longs rushs au-delà des formes d'onde (index, miniatures) si la lenteur persiste.
-- Synchronisation par l'heure de début des fichiers OBS (le nom de fichier contient l'heure) en plus de la
-  synchronisation audio, si celle-ci échoue sur les rushs Minecraft.
+- Synchronisation par l'heure de début des fichiers OBS (le nom de fichier contient l'heure, lu par
+  `recut_watch::obs_time`) puis affinage audio dans une fenêtre de ±60 s : multicam prête dès l'arrivée des POV
+  dans le dossier de veille.
+- **Sous-titres** : FilmCraft sait transcrire (Whisper, en pur Rust) et créer des sous-titres, mais la fonction
+  n'est pas compilée dans RECut (option `whisper`) et la transcription bloque l'interface pendant tout le calcul :
+  à passer en tâche de fond avec progression avant de l'activer.
+- **Dérush assisté** : repérer les moments forts (rires, cris, pics de voix simultanés, mots-clés de la
+  transcription) et les marquer, sur le modèle des temps morts.
+- Tests de FilmCraft qui échouent ici pour des raisons d'environnement (pas de RECut) : oracles ffmpeg (APV,
+  Matroska, EXR, préréglages d'export, `workflows`) avec le ffmpeg 6.1 du conteneur, et tests GPU (`fx_tests`)
+  sans carte graphique.
 - Un test de FilmCraft échoue déjà sans les modifications de RECut :
   `nest_editing_tests::with_the_toggle_off_a_sequence_edits_in_as_its_clips_with_their_transitions`.
 

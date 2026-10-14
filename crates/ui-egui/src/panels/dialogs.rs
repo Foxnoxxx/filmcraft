@@ -15,6 +15,10 @@ pub fn show(app: &mut FilmcraftApp, ctx: &egui::Context) {
     crate::panels::multicam::show_edit_cameras(app, ctx);
     // RECut: Balance Multi-Camera Sound (RECUT.md)
     crate::panels::recut_balance::show(app, ctx);
+    // RECut: Mark Dead Time (RECUT.md)
+    crate::panels::recut_deadtime::show(app, ctx);
+    // RECut: watch folder (RECUT.md)
+    crate::panels::recut_watch::show(app, ctx);
     crate::panels::monitor_view::dialogs(app, ctx);
     crate::panels::graphics::dialogs(app, ctx);
     crate::panels::workspaces::dialogs(app, ctx);

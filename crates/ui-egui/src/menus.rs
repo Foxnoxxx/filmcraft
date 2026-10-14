@@ -26,6 +26,8 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     uic!("window.dockPanel", "Dock Panel", [], None),
     uic!("window.floatPanel", "Undock Panel", [], None),
     uic!("window.closePanel", "Close Panel", [], None),
+    // RECut: the watch folder (RECUT.md)
+    uic!("recut.watchFolder", "Watch Folder…", ["File"], None),
     uic!("app.language.english", "English", ["Edit", "Language"], None),
     uic!("app.language.japanese", "日本語", ["Edit", "Language"], None),
     uic!("app.language.spanish", "Español", ["Edit", "Language"], None),
@@ -275,6 +277,14 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
     }
     // RECut: Balance Multi-Camera Sound… opens its dialog (RECUT.md)
     if let Some(r) = crate::panels::recut_balance::route(app, ctx, id, &params) {
+        return r;
+    }
+    // RECut: Mark Dead Time… opens its dialog, Remove Marked Dead Time says what it did (RECUT.md)
+    if let Some(r) = crate::panels::recut_deadtime::route(app, ctx, id, &params) {
+        return r;
+    }
+    // RECut: File ▸ Watch Folder… (RECUT.md)
+    if let Some(r) = crate::panels::recut_watch::route(app, ctx, id, &params) {
         return r;
     }
     if let Some(r) = crate::panels::clip_dialogs::route(app, id, &params) {
