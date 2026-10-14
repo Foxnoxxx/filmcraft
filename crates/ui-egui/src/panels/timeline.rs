@@ -1972,6 +1972,8 @@ pub(crate) const CLIP_MENU: &[&[(&str, &str)]] = &[
         ("Nest…", "clip.nest"),
         // RECut: clips in sync on several video tracks → one multi-camera clip whose sound follows the angle
         ("Nest as Multi-Camera", "recut.nestMulticam"),
+        // RECut: measure the multi-camera clip's tracks and set each one's level (RECUT.md)
+        ("Balance Multi-Camera Sound…", "recut.balanceMulticam"),
         ("Make Subsequence", "sequence.makeSubsequence"),
         ("Reveal Nested Sequence", "sequence.revealNested"),
         ("Multi-Camera", "clip.multicam"),

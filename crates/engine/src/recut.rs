@@ -2,6 +2,7 @@
 //!
 //! | Id | Menu | |
 //! |---|---|---|
+//! | `recut.balanceMulticam` | Clip ▸ Balance Multi-Camera Sound… | see [`crate::recut_balance`] |
 //! | `recut.nestMulticam` | Clip ▸ Nest as Multi-Camera | clips already in sync, stacked on several video tracks → a multi-camera source sequence (one camera per video track, with the sound linked to it) replaced by one multi-camera clip whose sound switches with the angle |
 //!
 //! Why `recut.nestMulticam`: Nest… follows Premiere, so a selection whose sound sits on several
@@ -22,6 +23,12 @@ use crate::{EngineError, Result, Session};
 const NEST_MULTICAM: &str = "recut.nestMulticam";
 
 pub fn commands() -> Vec<CommandSpec> {
+    let mut v = nest_commands();
+    v.extend(crate::recut_balance::commands());
+    v
+}
+
+fn nest_commands() -> Vec<CommandSpec> {
     vec![CommandSpec {
         id: NEST_MULTICAM,
         label: "Nest as Multi-Camera",
@@ -173,6 +180,19 @@ fn nest_multicam(s: &mut Session, p: &Value) -> Result<Value> {
                     None => own_sound.push(*id),
                 }
             }
+            // a camera's sound tracks that still have their default name ("Audio 3") are named
+            // after the camera, numbered when it has several ("zenh 1", "zenh 2"), as Create
+            // Multi-Camera Source Sequence names them
+            for c in &cameras {
+                let several = c.audio_tracks.len() > 1;
+                for (j, id) in c.audio_tracks.iter().enumerate() {
+                    let Some(t) = nq.audio_tracks.iter_mut().find(|t| t.id == *id) else { continue };
+                    let numbered = |prefix: &str| t.name.strip_prefix(prefix).is_some_and(|n| !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()));
+                    if t.name.trim().is_empty() || numbered("Audio ") || numbered("A") {
+                        t.name = if several { format!("{} {}", c.name, j + 1) } else { c.name.clone() };
+                    }
+                }
+            }
             if !own_sound.is_empty() {
                 // sound linked to no picture: an audio-only source, heard whatever the angle
                 cameras.push(Camera { name: "Audio".into(), video_track: None, audio_tracks: own_sound, enabled: true, source: None });
@@ -183,7 +203,12 @@ fn nest_multicam(s: &mut Session, p: &Value) -> Result<Value> {
         // the nest replaces the selection: picture on the lowest camera track, sound on the lowest
         // audio track used (or the first free one above), linked
         let whole = TimeRange::new(Tick::ZERO, span.duration);
-        let v = pr.make_track_item(nid, TrackKind::Video, start, whole, rate).ok_or_else(|| bad(cmd, "cannot place the multi-camera clip"))?;
+        let mut v = pr.make_track_item(nid, TrackKind::Video, start, whole, rate).ok_or_else(|| bad(cmd, "cannot place the multi-camera clip"))?;
+        // Motion's automatic points (the frame centre) become numbers, as Nest… does
+        let frame = (q.settings.width, q.settings.height);
+        for e in &mut v.effects {
+            filmcraft_project::resolve_auto_points(e, frame, frame);
+        }
         let a = pr.make_track_item(nid, TrackKind::Audio, start, whole, rate).ok_or_else(|| bad(cmd, "cannot place the multi-camera clip"))?;
         let (link, new_v, new_a) = (pr.alloc_id(), pr.alloc_id(), pr.alloc_id());
         let seq = pr.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;

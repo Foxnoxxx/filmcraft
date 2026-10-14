@@ -43,6 +43,8 @@ pub mod project_panel;
 pub mod project_tools;
 pub mod proxies;
 pub mod recut;
+// RECut: Balance Multi-Camera Sound (RECUT.md).
+pub mod recut_balance;
 pub mod relink;
 pub mod remix;
 pub mod scene_detect;

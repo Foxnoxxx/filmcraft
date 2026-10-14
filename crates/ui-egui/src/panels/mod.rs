@@ -43,6 +43,8 @@ pub mod settings;
 pub mod shortcuts_dialog;
 pub mod text;
 pub mod timecode;
+// RECut: Balance Multi-Camera Sound dialog (RECUT.md).
+pub mod recut_balance;
 pub mod timeline;
 pub mod timeline_automation;
 pub mod timeline_captions;

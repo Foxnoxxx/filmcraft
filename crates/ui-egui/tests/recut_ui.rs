@@ -1,5 +1,6 @@
-//! RECut: UI tests of the RECut additions (RECUT.md): the timeline clip menu's audio settings and
-//! Nest as Multi-Camera, and the search field of the Graphics font list.
+//! RECut: UI tests of the RECut additions (RECUT.md): the timeline clip menu's audio settings,
+//! Nest as Multi-Camera and Balance Multi-Camera Sound, and the search field of the Graphics font
+//! list. With `RECUT_UI_SHOTS=<dir>` the balance dialog is also rendered (wgpu) to a PNG there.
 
 use std::sync::mpsc::{Sender, channel};
 
@@ -127,4 +128,99 @@ fn font_list_has_a_search_field() {
         e.param("font").unwrap().value_at(filmcraft_time::Tick::ZERO)
     };
     assert_eq!(font, filmcraft_project::ParamValue::Text("JetBrains Mono".into()));
+}
+
+/// Two cameras (bars and tone, picture and sound linked), stacked on V1/A1 and V2/A2, nested as
+/// multi-camera: returns the driver, the multi-camera picture clip and the source sequence.
+fn multicam_driver() -> (Driver, u64, u64) {
+    use filmcraft_media::MediaSource;
+    use filmcraft_project::{ItemKind, Label, MediaClip, MediaRef, SequenceSettings};
+    use filmcraft_time::FrameRate;
+    let rate = FrameRate::FPS_24;
+    let mut s = Session::default();
+    let mut p = (*s.project).clone();
+    let seq = p.new_sequence("Cut", SequenceSettings { width: 64, height: 36, frame_rate: rate, ..Default::default() }, 2, 2, None);
+    let mut items = Vec::new();
+    for name in ["zenh.mp4", "screu.mp4"] {
+        let src = filmcraft_media::generators::GeneratorSource::new(filmcraft_media::Generator::BarsAndTone, 64, 36, rate, rate.tick_of(48));
+        let clip = MediaClip {
+            media: MediaRef::Generator(filmcraft_media::Generator::BarsAndTone),
+            info: src.info().clone(),
+            interpret: Default::default(),
+            mark_in: None,
+            mark_out: None,
+            markers: vec![],
+            offline: false,
+            proxy: None,
+            identity: None,
+        };
+        items.push(p.add_item(name, Label::Iris, ItemKind::Media(clip), None));
+    }
+    s.project = std::sync::Arc::new(p);
+    s.state.active_sequence = Some(seq);
+    s.state.open_sequences = vec![seq];
+    for (item, (v, a)) in items.iter().zip([("V1", "A1"), ("V2", "A2")]) {
+        s.execute("timeline.place", json!({"item": item.0, "track": v, "audioTrack": a, "frame": 0})).unwrap();
+    }
+    let all: Vec<u64> = s.active_sequence().unwrap().all_tracks().flat_map(|t| t.items.iter().map(|i| i.id.0)).collect();
+    s.execute("timeline.select", json!({"clips": all})).unwrap();
+    let r = s.execute("recut.nestMulticam", json!({})).unwrap();
+    let clips: Vec<u64> = r["clips"].as_array().unwrap().iter().map(|c| c.as_u64().unwrap()).collect();
+    let src = r["sequence"].as_u64().unwrap();
+    let (tx, rx) = channel();
+    let app = FilmcraftApp::new(s).with_control(rx);
+    let mut b = Harness::builder().with_size(egui::vec2(1600.0, 1100.0)).with_max_steps(10_000);
+    if std::env::var_os("RECUT_UI_SHOTS").is_some() {
+        b = b.wgpu().with_pixels_per_point(1.0);
+    }
+    let harness = b.build_eframe(move |_cc| app);
+    let mut d = Driver { harness, tx };
+    d.frames(4);
+    (d, clips[0], src)
+}
+
+#[test]
+fn balance_dialog_analyses_the_tracks_and_applies_the_roles() {
+    let (mut d, clip, src) = multicam_driver();
+    let tracks: Vec<u64> = d.harness.state().session.project.sequence(filmcraft_project::ItemId(src)).unwrap().audio_tracks.iter().map(|t| t.id.0).collect();
+    assert_eq!(tracks.len(), 2);
+    d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
+    d.frames(3);
+    d.click("timeline.clipMenu.recut.balanceMulticam");
+    // the analysis runs in the background; the role buttons appear when it is done
+    let row = format!("balance.{}.voice", tracks[0]);
+    let mut ready = false;
+    for _ in 0..200 {
+        if d.has(&row) {
+            ready = true;
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(ready, "analysis finished");
+    if let Some(dir) = std::env::var_os("RECUT_UI_SHOTS").map(std::path::PathBuf::from) {
+        d.frames(6);
+        let img = d.harness.render().expect("wgpu render");
+        std::fs::create_dir_all(&dir).unwrap();
+        img.save(dir.join("balance-dialog.png")).unwrap();
+    }
+    // one camera muted, the other kept as it is; no limiter
+    d.click(&format!("balance.{}.mute", tracks[0]));
+    d.click(&format!("balance.{}.keep", tracks[1]));
+    d.click("balance.limit");
+    d.click("balance.ok");
+    assert!(!d.has("balance.ok"), "dialog closed: {}", d.harness.state().ui.status);
+    let q = d.harness.state().session.project.sequence(filmcraft_project::ItemId(src)).unwrap().clone();
+    assert!(q.audio_tracks[0].muted && !q.audio_tracks[1].muted);
+    assert!(q.master_effects.is_empty(), "limiter unticked");
+    let undo = d.exec("history.list", json!({}));
+    assert_eq!(undo["undo"].as_array().unwrap().last().and_then(Value::as_str), Some("Balance Multi-Camera Sound"));
+    // Escape closes the dialog without changing anything
+    d.ok("ui.click", json!({"id": format!("timeline.clip.{clip}"), "button": "right"}));
+    d.frames(3);
+    d.click("timeline.clipMenu.recut.balanceMulticam");
+    assert!(d.has("balance.cancel"));
+    d.ok("ui.key", json!({"key": "Escape"}));
+    d.frames(3);
+    assert!(!d.has("balance.cancel"));
 }

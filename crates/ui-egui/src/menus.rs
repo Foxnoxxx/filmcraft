@@ -273,6 +273,10 @@ pub fn invoke(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut params:
     if let Some(r) = crate::panels::voiceover::route(app, ctx, id, &params) {
         return r;
     }
+    // RECut: Balance Multi-Camera Sound… opens its dialog (RECUT.md)
+    if let Some(r) = crate::panels::recut_balance::route(app, ctx, id, &params) {
+        return r;
+    }
     if let Some(r) = crate::panels::clip_dialogs::route(app, id, &params) {
         return r;
     }

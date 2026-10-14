@@ -95,6 +95,8 @@ fn nest_multicam_gives_each_camera_its_own_sound() {
     assert_eq!(mc.cameras[1].audio_tracks.len(), 1);
     let streams: Vec<usize> = nq.audio_tracks.iter().map(|t| t.items[0].audio_stream).collect();
     assert_eq!(streams, [0, 1, 0]);
+    let names: Vec<&str> = nq.audio_tracks.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["zenh 1", "zenh 2", "screu"], "sound tracks named after their camera");
     // the edit: one picture and one sound clip, linked, both multi-camera on angle 0
     let q = s.active_sequence().unwrap();
     let clips: Vec<_> = q.all_tracks().flat_map(|t| t.items.iter()).collect();
@@ -103,6 +105,9 @@ fn nest_multicam_gives_each_camera_its_own_sound() {
     assert_eq!(clips[0].link, clips[1].link);
     assert!(clips[0].link.is_some());
     assert_eq!((q.video_tracks[0].items.len(), q.audio_tracks[0].items.len()), (1, 1));
+    // Motion's position is a number (the frame centre), not "automatic" (NaN in Properties)
+    let pos = q.video_tracks[0].items[0].effect("motion").and_then(|e| e.param("position")).map(|p| p.value.clone());
+    assert_eq!(pos, Some(filmcraft_project::ParamValue::Vec2(filmcraft_geom::Vec2 { x: 16.0, y: 16.0 })), "{pos:?}");
     // sound follows the picture: cutting to camera 2 switches both, and only Screu's track plays
     assert!(s.state.multicam_audio_follows_video, "on by default in RECut");
     s.set_playhead(Tick::ZERO);
@@ -246,4 +251,164 @@ fn nest_multicam_plays_every_stream_of_the_selected_camera() {
     let stream0 = level(&first_only);
     assert!(angle0 > stream0 * 1.3, "the second stream is heard too ({angle0} vs {stream0})");
     assert!((angle0 - level(&nq.with_angle_audio(Some(0)))).abs() < 1e-4);
+}
+
+// ---------------------------------------------------------------- Balance Multi-Camera Sound
+
+/// A sound file with one mono PCM stream per entry of `streams` (48 kHz, 16-bit).
+fn pcm_file(s: &mut Session, name: &str, streams: &[Vec<f32>]) -> ItemId {
+    use filmcraft_isobmff::{Brand, Mp4Writer, PcmConfig, SampleEntry, TrackConfig, WriteSample, WriterOptions};
+    let mut mux = Mp4Writer::new(std::io::Cursor::new(Vec::new()), WriterOptions::new(Brand::Mov)).unwrap();
+    for samples in streams {
+        let entry = SampleEntry::pcm(PcmConfig { bits: 16, float: false, big_endian: false, signed: true, channels: 1, sample_rate: 48_000.0 });
+        let track = mux.add_track(TrackConfig::new(entry, 48_000)).unwrap();
+        let data: Vec<u8> = samples.iter().flat_map(|v| ((v.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()).collect();
+        mux.write_sample(track, WriteSample { data: &data, duration: samples.len() as u32, composition_offset: 0, is_sync: true }).unwrap();
+    }
+    let bytes = mux.finish().unwrap().into_inner();
+    crate::commands::import_bytes(s, &format!("/{name}"), bytes.into(), None).unwrap()
+}
+
+/// Deterministic noise in [-1, 1].
+fn noise(seed: u32, n: usize) -> Vec<f32> {
+    let mut x = seed.wrapping_mul(2_654_435_761).max(1);
+    (0..n)
+        .map(|_| {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x as f32 / u32::MAX as f32) * 2.0 - 1.0
+        })
+        .collect()
+}
+
+/// Two cameras like Rémi's OBS recordings: Zenh with a mix track (voice + game), his voice (quiet,
+/// in bursts) and his game (loud); Screu with one mixed track. Nested as multi-camera.
+fn obs_multicam() -> (Session, ItemId, Vec<TrackId>) {
+    let n = 48_000 * 2;
+    let voice: Vec<f32> = noise(1, n).iter().enumerate().map(|(i, v)| if (i / 4_800) % 3 == 0 { v * 0.02 } else { 0.0 }).collect();
+    let game: Vec<f32> = noise(2, n).iter().map(|v| v * 0.3).collect();
+    let mix: Vec<f32> = voice.iter().zip(&game).map(|(a, b)| a + b).collect();
+    let screu: Vec<f32> = noise(3, n).iter().map(|v| v * 0.05).collect();
+    let (mut s, seq, zenh_pic, screu_pic) = session();
+    let zenh_snd = pcm_file(&mut s, "zenh.mov", &[mix, voice, game]);
+    let screu_snd = pcm_file(&mut s, "screu.mov", &[screu]);
+    s.state.active_sequence = Some(seq);
+    let (v, a) = tracks(&s);
+    let len = TimeRange::new(Tick::ZERO, RATE.tick_of(FRAMES));
+    let link = |s: &mut Session, clips: Vec<u64>| {
+        s.execute("timeline.select", json!({"clips": clips})).unwrap();
+        s.execute("clip.link", json!({})).unwrap();
+    };
+    crate::commands::place_item(&mut s, zenh_pic, len, Tick::ZERO, Some(v[0]), None, false, "test", None).unwrap();
+    crate::commands::place_item(&mut s, zenh_snd, len, Tick::ZERO, None, Some(a[0]), false, "test", None).unwrap();
+    let ids = |s: &Session, ts: &[(bool, usize)]| -> Vec<u64> {
+        let q = s.project.sequence(seq).unwrap();
+        ts.iter().map(|(video, i)| if *video { q.video_tracks[*i].items[0].id.0 } else { q.audio_tracks[*i].items[0].id.0 }).collect()
+    };
+    let zenh = ids(&s, &[(true, 0), (false, 0), (false, 1), (false, 2)]);
+    link(&mut s, zenh);
+    crate::commands::place_item(&mut s, screu_pic, len, Tick::ZERO, Some(v[1]), None, false, "test", None).unwrap();
+    crate::commands::place_item(&mut s, screu_snd, len, Tick::ZERO, None, Some(a[3]), false, "test", None).unwrap();
+    let screu = ids(&s, &[(true, 1), (false, 3)]);
+    link(&mut s, screu);
+    let all: Vec<u64> = s.project.sequence(seq).unwrap().all_tracks().flat_map(|t| t.items.iter().map(|i| i.id.0)).collect();
+    s.execute("timeline.select", json!({"clips": all})).unwrap();
+    let r = s.execute("recut.nestMulticam", json!({})).unwrap();
+    let src = ItemId(r["sequence"].as_u64().unwrap());
+    let audio: Vec<TrackId> = s.project.sequence(src).unwrap().audio_tracks.iter().map(|t| t.id).collect();
+    assert_eq!(audio.len(), 4, "Zenh's three streams and Screu's one");
+    (s, src, audio)
+}
+
+#[test]
+fn balance_analysis_finds_the_obs_mix_track_and_suggests_roles() {
+    let (mut s, src, t) = obs_multicam();
+    let r = s.execute("recut.balanceMulticam", json!({"analyze": true})).unwrap();
+    assert_eq!(r["sequence"], src.0);
+    let rows = r["tracks"].as_array().unwrap();
+    let row = |id: TrackId| rows.iter().find(|x| x["track"] == id.0).unwrap().clone();
+    assert_eq!(row(t[0])["mixOf"], json!([t[1].0, t[2].0]), "track 1 = voice + game: {}", row(t[0]));
+    assert_eq!(row(t[0])["suggested"], "mute");
+    assert_eq!(row(t[1])["suggested"], "voice", "the quiet one");
+    assert_eq!(row(t[2])["suggested"], "game");
+    assert_eq!(row(t[3])["suggested"], "mixed", "one track: voice and game together");
+    let lufs = |id: TrackId| row(id)["lufs"].as_f64().unwrap();
+    assert!(lufs(t[1]) < lufs(t[2]) - 10.0, "voice {} game {}", lufs(t[1]), lufs(t[2]));
+    // analysis changes nothing
+    assert!(s.history.undo.last().is_none_or(|h| h.0 != "Balance Multi-Camera Sound"));
+}
+
+#[test]
+fn balance_mutes_the_mix_track_and_brings_each_track_to_its_target() {
+    let (mut s, src, t) = obs_multicam();
+    let before = s.execute("recut.balanceMulticam", json!({"analyze": true})).unwrap();
+    let lufs = |id: TrackId| before["tracks"].as_array().unwrap().iter().find(|x| x["track"] == id.0).unwrap()["lufs"].as_f64().unwrap();
+    s.execute("recut.balanceMulticam", json!({})).unwrap();
+    let q = s.project.sequence(src).unwrap().clone();
+    let tr = |id: TrackId| q.audio_tracks.iter().find(|x| x.id == id).unwrap().clone();
+    assert!(tr(t[0]).muted, "the OBS mix track is muted");
+    let gain = |id: TrackId| tr(id).items[0].gain_db;
+    assert!((gain(t[1]) - (-20.0 - lufs(t[1]))).abs() < 1e-6, "voice to -20 LUFS");
+    assert!((gain(t[2]) - (-28.0 - lufs(t[2]))).abs() < 1e-6, "game 8 dB under");
+    assert!((gain(t[3]) - (-24.0 - lufs(t[3]))).abs() < 1e-6, "mixed halfway");
+    let count = |id: TrackId, fx: &str| tr(id).effects.iter().filter(|e| e.effect == fx).count();
+    assert_eq!((count(t[1], "highpass"), count(t[1], "single_band_compressor")), (1, 1));
+    assert_eq!((count(t[2], "highpass"), count(t[2], "single_band_compressor")), (0, 1));
+    assert_eq!(q.master_effects.iter().filter(|e| e.effect == "hard_limiter").count(), 1);
+    // measured without clip gain: a second run lands on the same gains, and nothing is stacked
+    s.execute("recut.balanceMulticam", json!({})).unwrap();
+    let q2 = s.project.sequence(src).unwrap().clone();
+    for (a, b) in q2.audio_tracks.iter().zip(&q.audio_tracks) {
+        assert!((a.items[0].gain_db - b.items[0].gain_db).abs() < 1e-3, "same gain on a second run");
+    }
+    assert_eq!(q2.audio_tracks.iter().map(|x| x.effects.len()).collect::<Vec<_>>(), q.audio_tracks.iter().map(|x| x.effects.len()).collect::<Vec<_>>());
+    assert_eq!(q2.master_effects.len(), q.master_effects.len());
+    // after balancing, what Zenh's angle plays measures close to the voice + game targets
+    let provider = s.media.provider(s.project.clone(), s.services.clone());
+    let heard = crate::recut_balance::analyze(&q2.with_angle_audio(Some(0)), &provider);
+    assert!(heard.iter().all(|i| i.lufs.is_some() || i.track == t[0].0 || i.track == t[3].0), "{heard:?}");
+    // one undo step per run
+    s.execute("edit.undo", json!({})).unwrap();
+    s.execute("edit.undo", json!({})).unwrap();
+    let q0 = s.project.sequence(src).unwrap();
+    assert!(q0.audio_tracks.iter().all(|x| !x.muted && x.items[0].gain_db == 0.0 && x.effects.is_empty()));
+}
+
+#[test]
+fn balance_follows_the_roles_given_and_rejects_bad_ones() {
+    let (mut s, src, t) = obs_multicam();
+    // roles with loudness already measured: nothing to analyse
+    let r = s
+        .execute(
+            "recut.balanceMulticam",
+            json!({"sequence": src.0, "voiceLufs": -18, "gameOffset": 10, "compress": false, "limit": false, "roles": [
+                {"track": t[0].0, "role": "keep"},
+                {"track": t[1].0, "role": "voice", "lufs": -40.0},
+                {"track": t[2].0, "role": "game", "lufs": -16.0},
+                {"track": t[3].0, "role": "mute"},
+            ]}),
+        )
+        .unwrap();
+    assert_eq!(r["tracks"].as_array().unwrap().len(), 4);
+    let q = s.project.sequence(src).unwrap();
+    assert_eq!(q.audio_tracks[1].items[0].gain_db, 22.0);
+    assert_eq!(q.audio_tracks[2].items[0].gain_db, -12.0);
+    assert!(!q.audio_tracks[0].muted && q.audio_tracks[3].muted);
+    assert!(q.audio_tracks[2].effects.is_empty() && q.master_effects.is_empty(), "no compressor, no limiter");
+    // hostile input: an error, never a crash, and nothing changed
+    let undo = s.history.undo.len();
+    for bad in [
+        json!({"roles": [{"track": t[1].0, "role": "loud"}]}),
+        json!({"roles": [{"track": 999_999_999u64, "role": "voice"}]}),
+        json!({"roles": [{"role": "voice"}]}),
+        json!({"sequence": 424_242}),
+    ] {
+        assert!(s.execute("recut.balanceMulticam", bad.clone()).is_err(), "{bad}");
+    }
+    assert_eq!(s.history.undo.len(), undo);
+    // out-of-range numbers are clamped, NaN-like loudness is measured instead
+    s.execute("recut.balanceMulticam", json!({"voiceLufs": 1e9, "gameOffset": -5, "roles": [{"track": t[1].0, "role": "voice", "lufs": "x"}]})).unwrap();
+    let g = s.project.sequence(src).unwrap().audio_tracks[1].items[0].gain_db;
+    assert!(g.is_finite() && g.abs() <= 40.0);
 }
